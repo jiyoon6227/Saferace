@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.safetrace.mapper.MemberMapper">
+
+        <insert id="insert" parameterType="Member" useGeneratedKeys="true" keyProperty="memberId" keyColumn="MEMBER_ID">
+        INSERT INTO SF_MEMBER (LOGIN_ID, PASSWORD, NAME, ROLE)
+        VALUES (#{loginId}, #{password}, #{name}, #{role})
+    </insert>
+
+    <select id="findByLoginId" resultType="Member">
+        SELECT MEMBER_ID, LOGIN_ID, PASSWORD, NAME, ROLE, CREATED_AT
+        FROM SF_MEMBER
+        WHERE LOGIN_ID = #{loginId}
+    </select>
+
+</mapper>

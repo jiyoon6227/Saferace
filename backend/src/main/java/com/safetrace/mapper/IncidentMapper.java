@@ -1,0 +1,45 @@
+package com.safetrace.mapper;
+
+import com.safetrace.domain.Incident;
+import com.safetrace.domain.IncidentLog;
+import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
+
+import java.util.List;
+
+@Mapper
+public interface IncidentMapper {
+
+    // Incident 생성 (성공 시 incidentId가 파라미터 객체에 자동으로 채워짐)
+    int insertIncident(Incident incident);
+
+    Incident findById(@Param("incidentId") Long incidentId);
+
+    List<Incident> findAll();
+
+    // 시민 화면 - 관심지역 기준 활성 Incident 목록
+    List<Incident> findActiveByRegion(@Param("region") String region);
+
+    // 상태 변경 (Workflow 전이 시 사용)
+    int updateStatus(@Param("incidentId") Long incidentId,
+                      @Param("status") String status);
+
+    // 담당자 배정
+    int assignStaff(@Param("incidentId") Long incidentId,
+                     @Param("staffId") Long staffId);
+
+    // 종료 처리 (종료사유 필수)
+    int closeIncident(@Param("incidentId") Long incidentId,
+                       @Param("closeReason") String closeReason);
+
+    // 상태변경 이력 저장
+    int insertLog(IncidentLog log);
+
+    // 특정 Incident의 전체 Timeline 조회 (시민 화면 "내 제보 추적"에 사용)
+    List<IncidentLog> findLogsByIncidentId(@Param("incidentId") Long incidentId);
+
+    // 중복탐지용: 같은 재난유형 + 최근 N분 이내 발생한 Incident 후보 조회
+    // 실제 거리 계산(하버사인 공식)은 서비스 로직에서 위경도로 계산
+    List<Incident> findRecentByType(@Param("disasterType") String disasterType,
+                                     @Param("minutesAgo") int minutesAgo);
+}

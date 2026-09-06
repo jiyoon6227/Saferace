@@ -1,0 +1,35 @@
+server:
+  port: 8080
+
+spring:
+  datasource:
+    driver-class-name: oracle.jdbc.OracleDriver
+    # 본인 DB 정보로 바꾸세요
+    url: jdbc:oracle:thin:@localhost:1521:xe
+    username: YOUR_DB_USERNAME
+    password: YOUR_DB_PASSWORD
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 5MB
+
+mybatis:
+  mapper-locations: classpath:mappers/*.xml
+  type-aliases-package: com.safetrace.domain
+  configuration:
+    map-underscore-to-camel-case: true
+    # DB 컬럼(INCIDENT_ID) <-> 자바 필드(incidentId) 자동 매핑
+
+logging:
+  level:
+    com.safetrace: debug
+    org.springframework.security: debug
+
+jwt:
+  # 아무 문자열이나 32바이트 이상 무작위 값으로 직접 채우세요 (예: openssl rand -base64 48)
+  secret: "YOUR_OWN_RANDOM_JWT_SECRET_MIN_32_BYTES"
+  expiration-ms: 86400000   # 24시간
+
+# 제보 사진 저장 위치 (백엔드 실행 폴더 기준 상대경로)
+app:
+  upload-dir: uploads
