@@ -58,6 +58,12 @@
             <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
 
+        <!-- 이메일 발송 (안전확인 요청 알림) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-mail</artifactId>
+        </dependency>
+
         <!-- 개발 편의 (코드 자동생성) -->
         <dependency>
             <groupId>org.projectlombok</groupId>

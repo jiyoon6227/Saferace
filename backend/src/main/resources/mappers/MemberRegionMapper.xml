@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.safetrace.mapper.MemberRegionMapper">
+
+    <insert id="insert" parameterType="com.safetrace.domain.MemberRegion">
+        <selectKey keyProperty="memberRegionId" resultType="Long" order="BEFORE">
+            SELECT SEQ_SF_MEMBER_REGION.NEXTVAL FROM DUAL
+        </selectKey>
+        INSERT INTO SF_MEMBER_REGION (MEMBER_REGION_ID, MEMBER_ID, REGION_CODE, REGION_NAME, IS_PRIMARY)
+        VALUES (#{memberRegionId}, #{memberId}, #{regionCode,jdbcType=VARCHAR}, #{regionName}, #{isPrimary})
+    </insert>
+
+    <select id="findByMemberId" resultType="com.safetrace.domain.MemberRegion">
+        SELECT MEMBER_REGION_ID, MEMBER_ID, REGION_CODE, REGION_NAME, IS_PRIMARY, CREATED_AT
+        FROM SF_MEMBER_REGION
+        WHERE MEMBER_ID = #{memberId}
+        ORDER BY IS_PRIMARY DESC, CREATED_AT ASC
+    </select>
+
+    <delete id="delete">
+        DELETE FROM SF_MEMBER_REGION
+        WHERE MEMBER_REGION_ID = #{memberRegionId}
+    </delete>
+
+</mapper>

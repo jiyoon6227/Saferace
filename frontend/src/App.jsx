@@ -9,8 +9,11 @@ import LoginPage from "./pages/LoginPage";
 import StaffDashboard from "./pages/StaffDashboard";
 import ControlBoard from "./pages/ControlBoard";
 import ReportForm from "./pages/ReportForm";
+import MyPage from "./pages/MyPage";
+import SafetyCheckResponsePage from "./pages/SafetyCheckResponsePage";
 import { getCurrentUser, authFetch } from "./api/client";
-import { connectIncidentSocket } from "./api/socket";
+import { connectIncidentSocket, connectSafetyCheckSocket } from "./api/socket";
+import mainBg from "./assets/main.png";
 
 // ---- 색상/토큰 -----------------------------------------------------------
 // 신뢰감 있는 네이비(공공/안전) + 경보용 레드 + 대응중 앰버 + 완료 그린
@@ -22,13 +25,15 @@ const quickMenu = [
   { icon: Camera, label: "현장제보", highlight: true },
   { icon: GraduationCap, label: "행동요령" },
   { icon: Users, label: "가족확인" },
-  { icon: Navigation, label: "우회경로" },
+  { icon: Navigation, label: "안전지도" },
 ];
 
 const disasterMessages = [
-  { type: "호우", level: "red", region: "대전 유성구 궁동", time: "16:20", text: "호우주의보 발령. 하천 인근 주민은 안전한 곳으로 대피 바랍니다." },
-  { type: "화재", level: "red", region: "대전 서구 갈마동", time: "16:13", text: "화재 발생. 인근 주민은 창문을 닫고 대피 안내에 따라주세요." },
-  { type: "도로통제", level: "amber", region: "유성대로 일부구간", time: "16:09", text: "침수로 인한 도로 통제 중. 우회 바랍니다." },
+  { type: "호우", level: "red", region: "주요 도로 침수 발생", time: "10:24", text: "도로 일부 구간 통제 중" },
+  { type: "산사태", level: "red", region: "산사태 주의보 발효", time: "09:50", text: "주변 지역 접근을 자제해주세요." },
+  { type: "강풍", level: "blue", region: "강풍주의보 발효", time: "08:15", text: "시설물 낙하에 주의하세요." },
+  { type: "지진", level: "red", region: "지진 발생", time: "07:30", text: "현재 피해 상황 확인 중" },
+  { type: "기타", level: "amber", region: "도로 결빙 주의", time: "07:30", text: "출근길 안전운전하세요." },
 ];
 
 const actionGuides = [
@@ -155,7 +160,9 @@ export default function App() {
   const isStaff = currentUser?.role === "STAFF" || currentUser?.role === "ADMIN";
 
   const [tab, setTab] = useState("nearby");
-  const [page, setPage] = useState("home"); // "home" | "login"
+  // 이메일 안전확인 링크(?safetyCheckToken=xxx)로 들어온 거면 그 응답 화면부터 바로 보여줌
+  const safetyCheckTokenFromUrl = new URLSearchParams(window.location.search).get("safetyCheckToken");
+  const [page, setPage] = useState(safetyCheckTokenFromUrl ? "safety-check-response" : "home"); // "home" | "login" | "mypage" | "safety-check-response"
   const [token, setToken] = useState(localStorage.getItem("token"));
   const [showReportForm, setShowReportForm] = useState(false);
   const [reportSuccess, setReportSuccess] = useState(false);
@@ -178,6 +185,13 @@ export default function App() {
   }, [detailIncidentId]);
   const [detailTimeline, setDetailTimeline] = useState([]);
   const [detailTimelineLoading, setDetailTimelineLoading] = useState(false);
+
+  // 가족 안전확인 - 등록된 가족 + 나한테 온 응답대기 요청
+  const [families, setFamilies] = useState([]);
+  const [pendingSafetyChecks, setPendingSafetyChecks] = useState([]);
+  const [showSafetyCheckModal, setShowSafetyCheckModal] = useState(false);
+  const [selectedFamilyIds, setSelectedFamilyIds] = useState([]);
+  const [safetyCheckSending, setSafetyCheckSending] = useState(false);
 
   // 로그인된 상태면 화면 진입 시 내가 등록한 제보 목록을 실제 DB에서 가져옴
   useEffect(() => {
@@ -244,6 +258,66 @@ export default function App() {
     return () => socket.close();
   }, [token]);
 
+  // 로그인 상태면 등록된 가족 + 나한테 온 응답대기 안전확인 요청을 불러옴
+  const loadSafetyCheckData = () => {
+    if (!token) {
+      setFamilies([]);
+      setPendingSafetyChecks([]);
+      return;
+    }
+    authFetch("/api/family").then(setFamilies).catch(() => {});
+    authFetch("/api/safety-checks/received")
+      .then((list) => setPendingSafetyChecks(list.filter((c) => c.status === "PENDING")))
+      .catch(() => {});
+  };
+
+  useEffect(loadSafetyCheckData, [token]);
+
+  // 안전확인 WebSocket - 누가 나한테 요청을 보내거나, 내가 보낸 요청에 응답이 오면 실시간 갱신
+  useEffect(() => {
+    if (!token) return;
+    const socket = connectSafetyCheckSocket(() => {
+      loadSafetyCheckData();
+    });
+    return () => socket.close();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  const toggleSelectedFamily = (memberId) => {
+    setSelectedFamilyIds((prev) =>
+      prev.includes(memberId) ? prev.filter((id) => id !== memberId) : [...prev, memberId]
+    );
+  };
+
+  const sendSafetyCheckRequest = async () => {
+    if (selectedFamilyIds.length === 0) return;
+    setSafetyCheckSending(true);
+    try {
+      await authFetch("/api/safety-checks", {
+        method: "POST",
+        body: JSON.stringify({ targetMemberIds: selectedFamilyIds, incidentId: null }),
+      });
+      setShowSafetyCheckModal(false);
+      setSelectedFamilyIds([]);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setSafetyCheckSending(false);
+    }
+  };
+
+  const respondSafetyCheck = async (checkId, status) => {
+    try {
+      await authFetch(`/api/safety-checks/${checkId}/respond`, {
+        method: "PATCH",
+        body: JSON.stringify({ status }),
+      });
+      loadSafetyCheckData();
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
   const handleLoginSuccess = (newToken) => {
     setToken(newToken);
     setPage("home");
@@ -252,6 +326,7 @@ export default function App() {
   const handleLogout = () => {
     localStorage.removeItem("token");
     setToken(null);
+    setPage("home");
   };
 
   // 로그인 안 한 상태에서 현장제보 누르면 로그인부터 하도록 유도
@@ -323,8 +398,24 @@ export default function App() {
   const visibleGroups = showAllIncidents ? groupedIncidents : groupedIncidents.slice(0, 3);
   const hiddenCount = groupedIncidents.length - visibleGroups.length;
 
+  if (page === "safety-check-response") {
+    return (
+      <SafetyCheckResponsePage
+        token={safetyCheckTokenFromUrl}
+        onDone={() => {
+          window.history.replaceState({}, "", "/");
+          setPage("home");
+        }}
+      />
+    );
+  }
+
   if (page === "login") {
     return <LoginPage onLoginSuccess={handleLoginSuccess} onBackToHome={() => setPage("home")} />;
+  }
+
+  if (page === "mypage") {
+    return <MyPage onBackToHome={() => setPage("home")} onLogout={handleLogout} />;
   }
 
   if (page === "staff" && isStaff) {
@@ -332,297 +423,227 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans">
-      {/* 상단 유틸바 */}
-      <div className="bg-[#0F2540] text-slate-300 text-xs">
-        <div className="max-w-6xl mx-auto px-4 py-1.5 flex justify-between items-center">
-          <span>대전 · 세종 · 충청권 재난 상황추적 서비스</span>
-          <div className="flex gap-4">
-          {token ? (
-              <>
-                {isStaff && (
-                  <button className="hover:text-white" onClick={() => setPage("staff")}>STAFF 대시보드</button>
-                )}
-                <button className="hover:text-white" onClick={handleLogout}>로그아웃</button>
-              </>
-            ) : (
-              <button className="hover:text-white" onClick={() => setPage("login")}>로그인</button>
-            )}
-            <button className="hover:text-white" onClick={() => setPage("login")}>회원가입</button>
-          </div>
-        </div>
-      </div>
-
+    <div className="min-h-screen bg-[#F4F7FB] text-slate-800 font-sans">
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Hi+Melody&display=swap');`}</style>
       {/* 헤더 */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-10">
-        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-9 h-9 rounded-lg bg-[#0F2540] flex items-center justify-center">
-              <ShieldAlert className="w-5 h-5 text-amber-400" strokeWidth={2.5} />
+      <header className="bg-white border-b border-slate-100 sticky top-0 z-40">
+        <div className="max-w-[1450px] mx-auto px-6 h-[72px] flex items-center justify-between">
+          <button onClick={() => setPage("home")} className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-[#0B2A52] flex items-center justify-center shadow-sm">
+              <ShieldAlert className="w-5 h-5 text-amber-400" strokeWidth={2.4} />
             </div>
-            <div className="leading-tight">
-              <div className="font-extrabold text-lg text-[#0F2540] tracking-tight">세이프트레이스</div>
-              <div className="text-[10px] text-slate-400 tracking-wide">SAFETRACE · 재난 상황추적</div>
+            <div className="text-left leading-tight">
+              <div className="font-extrabold text-xl text-[#0B2A52] tracking-tight">세이프트레이스</div>
+              <div className="text-[10px] text-slate-400">함께 만드는 더 안전한 일상</div>
             </div>
-          </div>
+          </button>
 
-          <nav className="hidden md:flex items-center gap-7 text-sm font-medium text-slate-600">
-            <button className="text-[#0F2540] font-bold border-b-2 border-amber-500 pb-4 -mb-4">내 주변 재난</button>
-            <button className="hover:text-[#0F2540]">현장제보</button>
-            <button className="hover:text-[#0F2540]">내 제보 추적</button>
-            <button className="hover:text-[#0F2540]">행동요령</button>
-            <button className="hover:text-[#0F2540]">안전지도</button>
+          <nav className="hidden lg:flex items-center gap-10 text-[15px] font-semibold text-[#0B2A52]">
+            <button className="hover:text-blue-600">서비스 소개</button>
+            <button className="hover:text-blue-600">내 주변 재난</button>
+            <button onClick={handleReportClick} className="hover:text-blue-600">현장 제보</button>
+            <button className="hover:text-blue-600">안전지도</button>
+            <button className="hover:text-blue-600">행동요령</button>
+            <button className="hover:text-blue-600">소식 · 알림</button>
           </nav>
 
-          <div className="flex items-center gap-3 text-slate-500">
-            <Search className="w-5 h-5 cursor-pointer hover:text-[#0F2540]" />
+          <div className="flex items-center gap-4 text-[#0B2A52]">
+            <Search className="w-5 h-5 cursor-pointer" />
             <div className="relative">
-              <Bell className="w-5 h-5 cursor-pointer hover:text-[#0F2540]" />
-              <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full" />
+              <Bell className="w-5 h-5 cursor-pointer" />
+              <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full ring-2 ring-white" />
             </div>
-            <Menu className="w-5 h-5 md:hidden cursor-pointer" />
+            {token ? (
+              <button onClick={() => setPage("mypage")} className="hidden sm:flex items-center gap-2 font-bold text-sm">
+                <div className="w-9 h-9 rounded-full bg-[#0B2A52] text-white flex items-center justify-center"><Users className="w-4 h-4" /></div>
+                {currentUser?.name || "지윤"}님 <ChevronDown className="w-4 h-4" />
+              </button>
+            ) : (
+              <button onClick={() => setPage("login")} className="text-sm font-bold">로그인</button>
+            )}
           </div>
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-4 py-6">
-        {/* 시그니처 히어로 : 내 주변 재난 영향도 + 지금 해야 할 일 */}
-        <section className="bg-gradient-to-br from-[#0F2540] to-[#1B3A5C] rounded-2xl p-6 md:p-8 text-white mb-6 relative overflow-hidden">
-          <div className="absolute -right-10 -top-10 w-56 h-56 rounded-full bg-red-500/10" />
-          <div className="relative flex flex-col md:flex-row md:items-center justify-between gap-6">
-            <div>
-              <div className="flex items-center gap-2 mb-2">
-                <LevelBadge level="red">대응중</LevelBadge>
-                <span className="text-slate-300 text-sm">유성구 궁동 침수 · Incident #127</span>
-              </div>
-              <h1 className="text-2xl md:text-3xl font-extrabold mb-1">
-                내 위치에서 <span className="text-amber-400">약 1.3km</span> 떨어진 곳에 재난이 발생했습니다
-              </h1>
-              <p className="text-slate-300 text-sm">현재 담당기관이 대응 중이며, 상황은 실시간으로 갱신됩니다.</p>
+      {/* 메인 히어로 */}
+      <section className="relative overflow-hidden bg-[#071A31]">
+        {/*
+          배경 이미지는 절대 100% 100%로 강제 늘리지 않음.
+          object-cover가 원본 비율을 유지한 채 영역을 채워서
+          창 폭이 바뀌어도 지도가 찌그러지지 않는다.
+        */}
+        <img
+          src={mainBg}
+          alt=""
+          aria-hidden="true"
+          className="absolute inset-0 w-full h-full object-cover object-center pointer-events-none select-none"
+        />
+        <div className="absolute inset-0 bg-[#04182b]/10 pointer-events-none" />
 
-              <div className="flex flex-wrap gap-2 mt-4">
-                {["지하차도 진입 자제", "하천 주변 접근 금지", "우회로 이용 권장"].map((t) => (
-                  <span key={t} className="text-xs bg-white/10 border border-white/20 rounded-full px-3 py-1.5 flex items-center gap-1">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-amber-400" /> {t}
-                  </span>
-                ))}
-              </div>
+        <div className="relative max-w-[1450px] mx-auto px-5 sm:px-6 lg:px-8 py-9 sm:py-11 lg:py-12 grid grid-cols-1 lg:grid-cols-[1.08fr_0.92fr] gap-7 lg:gap-12 items-center">
+          <div className="max-w-[590px]">
+            <div className="text-[10px] sm:text-[11px] tracking-[0.42em] font-bold text-white/80 mb-3 sm:mb-4">SAFETRACE</div>
+            <h1 className="text-[38px] sm:text-[46px] xl:text-[54px] leading-[1.08] font-black tracking-tight text-white">
+              오늘도,<br />
+              <span className="text-[#36A3FF]">더 안전한 내일을</span> 위해
+            </h1>
+            <p className="mt-4 sm:mt-5 text-[14px] sm:text-[16px] leading-6 sm:leading-7 font-medium text-white/95">
+              작은 관심이 더 안전한 일상을 만듭니다.<br />
+              세이프트레이스는 언제나 함께합니다.
+            </p>
+            <div className="mt-5 bg-white rounded-2xl h-[54px] sm:h-[58px] shadow-xl shadow-black/20 border border-white/80 flex items-center px-4 sm:px-5 w-full max-w-[510px]">
+              <Search className="w-5 h-5 text-[#0B2A52] mr-3 shrink-0" />
+              <input className="w-full min-w-0 outline-none bg-transparent text-sm placeholder:text-slate-400" placeholder="지역, 재난 유형, 키워드를 검색해보세요." />
             </div>
-
-            <button className="shrink-0 bg-amber-500 hover:bg-amber-400 text-[#0F2540] font-bold rounded-xl px-5 py-3 flex items-center gap-2 self-start md:self-center">
-              내 주변 재난지도 보기 <ArrowRight className="w-4 h-4" />
-            </button>
           </div>
-        </section>
 
-        {/* 빠른메뉴 */}
-        <section className="mb-6">
-          <div className="grid grid-cols-3 md:grid-cols-6 gap-3">
-            {quickMenu.map(({ icon: Icon, label, highlight }) => (
-              <button
-                key={label}
-                onClick={label === "현장제보" ? handleReportClick : undefined}
-                className={`flex flex-col items-center gap-2 py-4 rounded-xl border transition
-                  ${highlight
-                    ? "bg-red-50 border-red-200 hover:border-red-400"
-                    : "bg-white border-slate-200 hover:border-[#0F2540]"}`}
-              >
-                <div className={`w-11 h-11 rounded-full flex items-center justify-center
-                  ${highlight ? "bg-red-100 text-red-600" : "bg-slate-100 text-[#0F2540]"}`}>
-                  <Icon className="w-5 h-5" />
-                </div>
-                <span className="text-xs font-semibold text-slate-700">{label}</span>
+          <div className="w-full bg-white/95 backdrop-blur-[2px] rounded-[22px] shadow-2xl shadow-slate-900/15 p-5 sm:p-6 border border-white/80">
+            <div className="flex items-start sm:items-center justify-between gap-3 mb-5">
+              <div className="flex items-center gap-3 font-bold text-[#0B2A52] text-sm sm:text-base">
+                <div className="w-9 h-9 rounded-full bg-red-50 flex items-center justify-center shrink-0"><ShieldAlert className="w-5 h-5 text-red-500" /></div>
+                지금, 내 주변에 발생한 재난
+              </div>
+              <button className="text-xs sm:text-sm text-slate-500 flex items-center shrink-0">더보기 <ChevronRight className="w-4 h-4" /></button>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+              <h2 className="text-[26px] sm:text-[31px] font-extrabold tracking-tight text-[#0B2A52]">내 주변 침수 위험</h2>
+              <span className="px-3 py-1 rounded-full bg-red-50 text-red-500 text-xs font-bold">호우</span>
+            </div>
+            <div className="mt-2 flex items-center gap-2 text-sm font-semibold text-slate-700">
+              <MapPin className="w-4 h-4 text-[#0B2A52] shrink-0" /> 내 위치에서 약 1.3km
+            </div>
+            <p className="mt-4 text-sm leading-6 text-slate-600">
+              현재 도로 일부 구간이 침수되어 통제되고 있습니다.<br className="hidden sm:block" /> 가까운 대피시설을 확인하고, 안전에 유의하세요.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-5">
+              <button className="h-12 rounded-xl bg-[#0B2A52] text-white text-sm font-bold flex items-center justify-center gap-2">
+                <Navigation className="w-4 h-4" /> 주변 재난지도 보기 <ArrowRight className="w-4 h-4" />
               </button>
-            ))}
-          </div>
-        </section>
-
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-          {/* 왼쪽: 재난속보 + 내 제보 추적 */}
-          <div className="lg:col-span-2 space-y-6">
-            {/* 재난속보 */}
-            <section className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
-              <div className="flex border-b border-slate-200">
-                <button
-                  onClick={() => setTab("nearby")}
-                  className={`flex-1 py-3 text-sm font-bold ${tab === "nearby" ? "text-[#0F2540] border-b-2 border-[#0F2540]" : "text-slate-400"}`}
-                >
-                  재난속보 · 문자
-                </button>
-                <button
-                  onClick={() => setTab("news")}
-                  className={`flex-1 py-3 text-sm font-bold ${tab === "news" ? "text-[#0F2540] border-b-2 border-[#0F2540]" : "text-slate-400"}`}
-                >
-                  재난 뉴스
-                </button>
-              </div>
-              <ul className="divide-y divide-slate-100">
-                {disasterMessages.map((m, i) => (
-                  <li key={i} className="p-4 flex gap-3 hover:bg-slate-50 cursor-pointer">
-                    <LevelBadge level={m.level}>{m.type}</LevelBadge>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 text-xs text-slate-400 mb-0.5">
-                        <span className="font-semibold text-slate-600">{m.region}</span>
-                        <span>·</span>
-                        <span>{m.time}</span>
-                      </div>
-                      <p className="text-sm text-slate-700 truncate">{m.text}</p>
-                    </div>
-                    <ChevronRight className="w-4 h-4 text-slate-300 shrink-0 self-center" />
-                  </li>
-                ))}
-              </ul>
-            </section>
-
-            {/* 재난유형별 행동요령 */}
-            <section className="bg-white rounded-2xl border border-slate-200 p-5">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="font-bold text-[#0F2540]">국민행동요령</h2>
-                <span className="text-xs text-amber-600 font-semibold bg-amber-50 px-2 py-1 rounded">여름철 주요재난</span>
-              </div>
-              <div className="grid grid-cols-4 gap-3">
-                {actionGuides.map(({ icon: Icon, label }) => (
-                  <button key={label} className="flex flex-col items-center gap-2 py-4 rounded-xl border border-slate-200 hover:border-[#0F2540] hover:bg-slate-50">
-                    <Icon className="w-6 h-6 text-[#0F2540]" />
-                    <span className="text-xs font-medium text-slate-600">{label}</span>
-                  </button>
-                ))}
-              </div>
-            </section>
-          </div>
-
-          {/* 오른쪽: 날씨 + 내 제보 추적 (시그니처) */}
-          <div className="space-y-6">
-            {/* 날씨 */}
-            <section className="bg-white rounded-2xl border border-slate-200 p-5">
-              <div className="flex items-center gap-1 text-sm font-bold text-[#0F2540] mb-3">
-                <MapPin className="w-4 h-4" /> 대전광역시 유성구
-              </div>
-              <div className="text-4xl font-extrabold text-[#0F2540]">29°C</div>
-              <div className="text-sm text-slate-500 mt-1">습도 70% · 강수확률 60%</div>
-              <div className="text-sm text-slate-500">풍속 0.4m/s</div>
-            </section>
-
-            {/* 내 제보 추적 — 프로젝트 시그니처 컴포넌트 */}
-            <section className="bg-white rounded-2xl border-2 border-[#0F2540] p-5">
-              <div className="flex items-center justify-between mb-1">
-                <h2 className="font-bold text-[#0F2540]">내 현장제보 추적</h2>
-                <Camera className="w-4 h-4 text-slate-400" />
-              </div>
-
-              {!token && (
-                <p className="text-xs text-slate-500 py-4">로그인하면 내가 등록한 제보를 확인할 수 있습니다.</p>
-              )}
-
-              {token && myReportsLoading && (
-                <p className="text-xs text-slate-400 py-4">불러오는 중...</p>
-              )}
-
-              {token && !myReportsLoading && myReports.length === 0 && (
-                <p className="text-xs text-slate-500 py-4">아직 등록한 제보가 없습니다.</p>
-              )}
-
-              {/* 사건에 연결된 제보 — 사건 단위로 묶어서 카드 하나로 표시 */}
-              {token && !myReportsLoading && groupedIncidents.length > 0 && (
-                <>
-                  <ul className="space-y-2 mb-1">
-                    {visibleGroups.map(({ incidentId, incident, reports }) => {
-                      const Icon = DISASTER_ICON[reports[0]?.disasterType] || ShieldAlert;
-                      const barColor = STATUS_BAR[incident?.status] || "bg-slate-300";
-                      return (
-                        <li
-                          key={incidentId}
-                          onClick={() => openIncidentDetail(incidentId)}
-                          className="relative rounded-xl border border-slate-100 hover:border-[#0F2540] hover:shadow-sm cursor-pointer transition overflow-hidden"
-                        >
-                          <span className={`absolute left-0 top-0 bottom-0 w-1 ${barColor}`} />
-                          <div className="p-3 pl-4">
-                            <div className="flex items-center justify-between mb-1 gap-2">
-                              <div className="flex items-center gap-1.5 min-w-0">
-                                <Icon className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                                <span className="text-sm font-semibold text-slate-800 truncate">
-                                  {incident?.title || `${reports[0]?.disasterType} 관련 사건`}
-                                </span>
-                              </div>
-                              <span className={`text-xs font-bold px-2 py-0.5 rounded shrink-0 ${STATUS_STYLE[incident?.status] || "bg-slate-100 text-slate-500"}`}>
-                                {incident ? STATUS_LABEL[incident.status] || incident.status : "확인 중..."}
-                              </span>
-                            </div>
-                            <p className="text-xs text-slate-400">
-                              내 제보 {reports.length}건 포함 (#{reports.map((r) => r.reportId).join(", #")})
-                            </p>
-                            {incident && <MiniTimeline logs={incidentTimelines[incidentId]} />}
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ul>
-
-                  {hiddenCount > 0 && (
-                    <button
-                      onClick={() => setShowAllIncidents(true)}
-                      className="w-full text-xs font-semibold text-slate-500 hover:text-[#0F2540] py-2 flex items-center justify-center gap-1"
-                    >
-                      더보기 ({hiddenCount}건 더) <ChevronRight className="w-3 h-3" />
-                    </button>
-                  )}
-                  {showAllIncidents && groupedIncidents.length > 3 && (
-                    <button
-                      onClick={() => setShowAllIncidents(false)}
-                      className="w-full text-xs text-slate-400 hover:text-slate-600 py-1"
-                    >
-                      접기
-                    </button>
-                  )}
-                </>
-              )}
-
-              {/* 아직 사건에 연결 안 된 제보 — 접수 대기 상태만 짧게 안내 */}
-              {token && !myReportsLoading && unlinkedReports.length > 0 && (
-                <div className={groupedIncidents.length > 0 ? "mt-3 pt-3 border-t border-slate-100" : ""}>
-                  <p className="text-xs text-slate-400">
-                    접수 대기 중인 제보 {unlinkedReports.length}건 (#{unlinkedReports.map((r) => r.reportId).join(", #")}) · 확인중
-                  </p>
-                </div>
-              )}
-
-              <button
-                onClick={openTrackingOverview}
-                disabled={uniqueLinkedIds.length === 0}
-                className="mt-4 w-full text-sm font-bold text-[#0F2540] border border-slate-200 rounded-lg py-2.5 flex items-center justify-center gap-1 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                담당기관 대응상황 전체보기 <ArrowRight className="w-3.5 h-3.5" />
+              <button onClick={handleReportClick} className="h-12 rounded-xl bg-white border border-slate-200 text-[#0B2A52] text-sm font-bold flex items-center justify-center gap-2">
+                <Camera className="w-4 h-4" /> 현장 제보하기
               </button>
-            </section>
+            </div>
+          </div>
+        </div>
+      </section>
 
-            {/* 가족 안전확인 미니 카드 */}
-            <section className="bg-white rounded-2xl border border-slate-200 p-5">
-              <h2 className="font-bold text-[#0F2540] mb-3 flex items-center gap-1.5">
-                <Users className="w-4 h-4" /> 가족 안전확인
-              </h2>
-              <div className="space-y-2">
-                {[
-                  { name: "아빠 · 유성구", status: "확인 필요", ok: false },
-                  { name: "엄마 · 서구", status: "안전확인 15:31", ok: true },
-                ].map((f) => (
-                  <div key={f.name} className="flex items-center justify-between text-sm">
-                    <span className="text-slate-700">{f.name}</span>
-                    <span className={`text-xs font-semibold flex items-center gap-1 ${f.ok ? "text-emerald-600" : "text-red-500"}`}>
-                      {f.ok ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Clock className="w-3.5 h-3.5" />}
-                      {f.status}
-                    </span>
+      {/* 퀵 메뉴 */}
+      <section className="relative z-20 -mt-7 max-w-[1450px] mx-auto px-6">
+        <div className="bg-white rounded-[22px] shadow-lg shadow-slate-900/8 border border-slate-100 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 overflow-hidden">
+          {quickMenu.map(({ icon: Icon, label }, index) => {
+            const iconStyles = [
+              "bg-blue-50 text-blue-600",
+              "bg-orange-50 text-orange-500",
+              "bg-blue-50 text-blue-600",
+              "bg-blue-50 text-blue-600",
+              "bg-blue-50 text-blue-600",
+              "bg-emerald-50 text-emerald-500",
+            ];
+            const sub = {
+              대피시설: "가까운 대피소를 확인하세요",
+              위험지역: "재난 위험지역을 확인하세요",
+              현장제보: "지금, 바로 제보해주세요",
+              행동요령: "상황별 행동요령을 확인하세요",
+              가족확인: "사랑하는 가족의 안전을 확인하세요",
+              안전지도: "지도에서 한눈에 확인하세요",
+            }[label];
+            return (
+              <button key={label} onClick={label === "현장제보" ? handleReportClick : undefined} className={`px-5 py-6 flex items-center gap-4 text-left hover:bg-slate-50 transition ${index !== 5 ? "lg:border-r border-slate-100" : ""}`}>
+                <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${iconStyles[index]}`}><Icon className="w-6 h-6" /></div>
+                <div>
+                  <div className="font-bold text-[#0B2A52] text-sm">{label === "가족확인" ? "가족 안전확인" : label === "대피시설" ? "대피시설 찾기" : label === "현장제보" ? "현장 제보하기" : label === "안전지도" ? "안전지도" : label}</div>
+                  <div className="text-[11px] text-slate-400 mt-1 whitespace-nowrap">{sub}</div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* 하단 대시보드 */}
+      <main className="max-w-[1450px] mx-auto px-6 py-5 pb-12">
+        <div className="grid grid-cols-1 lg:grid-cols-[0.95fr_1.05fr_0.95fr] gap-4 items-start">
+          {/* 실시간 재난 정보 */}
+          <section className="bg-white rounded-[18px] border border-slate-200 shadow-sm overflow-hidden min-h-[470px]">
+            <div className="px-5 pt-5 pb-3 flex items-center justify-between">
+              <h2 className="text-[18px] font-extrabold text-[#0B2A52] flex items-center gap-2"><span className="text-red-500">◉</span> 실시간 재난 · 안전 정보</h2>
+              <button className="text-sm text-[#0B2A52] flex items-center">더보기 <ChevronRight className="w-4 h-4" /></button>
+            </div>
+            <div className="px-5 flex gap-2 pb-3">
+              {["전체", "호우", "태풍", "지진", "화재", "기타"].map((x, i) => <button key={x} className={`px-4 py-2 rounded-lg text-xs font-bold ${i === 0 ? "bg-[#0B2A52] text-white" : "bg-slate-100 text-slate-500"}`}>{x}</button>)}
+            </div>
+            <ul className="px-5">
+              {disasterMessages.map((m, i) => (
+                <li key={i} className="py-4 border-t border-slate-100 flex gap-4 items-start">
+                  <span className={`min-w-[56px] text-center rounded-lg px-2 py-1.5 text-xs font-bold ${m.level === "red" ? "bg-red-50 text-red-500" : m.level === "blue" ? "bg-blue-50 text-blue-600" : "bg-slate-100 text-slate-600"}`}>{m.type}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-bold text-[15px] text-[#0B2A52] truncate">{m.region}</div>
+                    <div className="text-[13px] text-slate-400 mt-1">{m.text}</div>
                   </div>
-                ))}
+                  <span className="text-xs text-slate-400">{m.time}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+
+          {/* 안전지도 */}
+          <section className="bg-white rounded-[18px] border border-slate-200 shadow-sm overflow-hidden min-h-[470px]">
+            <div className="px-5 py-5 flex items-center justify-between">
+              <h2 className="text-[18px] font-extrabold text-[#0B2A52] flex items-center gap-2"><MapPin className="w-5 h-5 text-blue-600" /> 내 주변 안전지도</h2>
+              <button className="text-sm text-[#0B2A52] flex items-center">더보기 <ChevronRight className="w-4 h-4" /></button>
+            </div>
+            <div className="mx-3 mb-3 h-[390px] rounded-[14px] overflow-hidden relative border border-slate-100 bg-[#E9F0E7]">
+              <div className="absolute inset-0 opacity-90" style={{ backgroundImage: 'linear-gradient(25deg, transparent 44%, rgba(255,255,255,.95) 45%, rgba(255,255,255,.95) 49%, transparent 50%), linear-gradient(-32deg, transparent 46%, rgba(255,255,255,.95) 47%, rgba(255,255,255,.95) 51%, transparent 52%), linear-gradient(90deg, transparent 31%, rgba(88,174,226,.45) 32%, rgba(88,174,226,.45) 47%, transparent 48%)', backgroundSize: '180px 160px, 210px 180px, 100% 100%' }} />
+              <div className="absolute top-3 right-3 bg-white rounded-full px-4 py-2 text-xs font-bold text-[#0B2A52] shadow">내 위치 반경 3km</div>
+              <div className="absolute left-[50%] top-[43%] -translate-x-1/2 -translate-y-1/2 w-7 h-7 bg-blue-600 rounded-full border-4 border-white shadow-lg" />
+              <div className="absolute left-[50%] top-[50%] -translate-x-1/2 bg-white px-3 py-1.5 rounded-full text-[11px] font-bold text-[#0B2A52] shadow">현재 위치</div>
+              {[['26%','22%'],['72%','30%'],['21%','55%'],['70%','57%']].map(([l,t],i)=><div key={i} className="absolute" style={{left:l,top:t}}><div className="w-9 h-9 rounded-full bg-red-500 border-4 border-white shadow flex items-center justify-center text-white font-black">!</div></div>)}
+              {[['61%','18%'],['28%','78%']].map(([l,t],i)=><div key={i} className="absolute" style={{left:l,top:t}}><div className="w-9 h-9 rounded-full bg-blue-600 border-4 border-white shadow flex items-center justify-center"><Home className="w-4 h-4 text-white" /></div></div>)}
+              
+            </div>
+          </section>
+
+          {/* 오른쪽 카드들 */}
+          <div className="space-y-4">
+            <section className="bg-white rounded-[18px] border border-slate-200 shadow-sm p-5">
+              <div className="flex items-center justify-between mb-2"><h2 className="text-[18px] font-extrabold text-[#0B2A52]">현재 날씨</h2><button className="text-sm text-[#0B2A52] flex items-center">더보기 <ChevronRight className="w-4 h-4" /></button></div>
+              <div className="text-xs text-slate-400 mb-2">내 위치 기준</div>
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3"><div className="text-5xl">🌤️</div><div><div className="text-[38px] leading-none font-black text-[#0B2A52]">28°C</div><div className="text-xs text-slate-500 mt-2">구름 조금 · 체감온도 30°C</div></div></div>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-500"><span>미세먼지</span><b className="text-blue-600">좋음</b><span>강수확률</span><b>30%</b><span>습도</span><b>65%</b></div>
               </div>
+            </section>
+
+            <section className="bg-white rounded-[18px] border border-slate-200 shadow-sm p-5">
+              <div className="flex items-center justify-between mb-4"><h2 className="text-[18px] font-extrabold text-[#0B2A52] flex items-center gap-2"><Camera className="w-5 h-5 text-blue-600" /> 내 현장제보 추적</h2><button onClick={openTrackingOverview} className="text-sm text-[#0B2A52] flex items-center">더보기 <ChevronRight className="w-4 h-4" /></button></div>
+              {!token ? <p className="text-sm text-slate-400 py-6 text-center">로그인하면 내가 등록한 제보를 확인할 수 있습니다.</p> : myReportsLoading ? <p className="text-sm text-slate-400 py-6 text-center">불러오는 중...</p> : myReports.length === 0 ? <p className="text-sm text-slate-400 py-6 text-center">아직 등록한 제보가 없습니다.</p> : (
+                <div className="space-y-3">
+                  {visibleGroups.slice(0,1).map(({ incidentId, incident, reports }) => (
+                    <button key={incidentId} onClick={() => openIncidentDetail(incidentId)} className="w-full text-left">
+                      <div className="flex gap-3 items-center"><div className="w-[74px] h-[58px] rounded-lg bg-slate-200 overflow-hidden flex items-center justify-center"><Droplets className="w-6 h-6 text-blue-500" /></div><div className="flex-1"><div className="flex items-center justify-between"><b className="text-[#0B2A52]">{incident?.title || '도로 침수 위험'}</b><span className="text-[11px] px-2 py-1 rounded-full bg-blue-50 text-blue-600 font-bold">{incident ? STATUS_LABEL[incident.status] || incident.status : '접수완료'}</span></div><div className="text-xs text-slate-400 mt-1">{incident?.region || '내 주변 신고 위치'}</div></div></div>
+                      <div className="mt-4 flex items-center"><div className="w-3 h-3 rounded-full bg-blue-600"/><div className="h-[3px] flex-1 bg-blue-200"/><div className="w-3 h-3 rounded-full bg-blue-400"/><div className="h-[3px] flex-1 bg-slate-200"/><div className="w-3 h-3 rounded-full bg-slate-300"/><div className="h-[3px] flex-1 bg-slate-200"/><div className="w-3 h-3 rounded-full bg-slate-300"/></div>
+                      <div className="grid grid-cols-4 text-[10px] text-slate-400 mt-1 text-center"><span>접수</span><span>담당자 배정</span><span>현장 확인</span><span>처리 완료</span></div>
+                    </button>
+                  ))}
+                  {groupedIncidents.length === 0 && <p className="text-sm text-slate-400 py-4 text-center">연결된 사건이 아직 없습니다.</p>}
+                </div>
+              )}
+            </section>
+
+            <section className="bg-white rounded-[18px] border border-slate-200 shadow-sm p-5">
+              <div className="flex items-center justify-between mb-4"><h2 className="text-[18px] font-extrabold text-[#0B2A52] flex items-center gap-2"><Users className="w-5 h-5 text-blue-600" /> 가족 안전확인</h2><button onClick={() => setPage("mypage")} className="text-sm text-[#0B2A52] flex items-center">더보기 <ChevronRight className="w-4 h-4" /></button></div>
+              {!token ? <p className="text-sm text-slate-400 py-3">로그인하면 가족 안전확인을 이용할 수 있습니다.</p> : families.length === 0 ? <p className="text-sm text-slate-400 py-3">등록된 가족이 없습니다. 마이페이지에서 가족을 등록해보세요.</p> : (
+                <div className="space-y-3">
+                  {families.slice(0,2).map((f, i) => <div key={f.relationId} className="flex items-center gap-3"><div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center"><Users className="w-4 h-4 text-slate-500" /></div><b className="text-sm text-[#0B2A52] flex-1">{f.familyMemberName}</b><span className={`text-xs px-3 py-1 rounded-full font-bold ${i===0 ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>{i===0 ? '안전' : '응답 대기'}</span></div>)}
+                  <button onClick={() => setShowSafetyCheckModal(true)} className="w-full h-11 rounded-xl bg-[#0B2A52] text-white text-sm font-bold flex items-center justify-center gap-2 mt-3">가족에게 안전확인 요청하기 <ArrowRight className="w-4 h-4" /></button>
+                </div>
+              )}
             </section>
           </div>
         </div>
       </main>
 
-      <footer className="border-t border-slate-200 py-6 text-center text-xs text-slate-400">
-        세이프트레이스 · 대전·세종·충청권 재난 상황관리·대응 플랫폼 (개인 프로젝트 데모)
-      </footer>
+      <footer className="border-t border-slate-200 py-6 text-center text-xs text-slate-400 bg-white">세이프트레이스 · 재난 상황관리·대응 플랫폼 (개인 프로젝트 데모)</footer>
 
       {showReportForm && (
         <ReportForm onClose={() => setShowReportForm(false)} onSuccess={handleReportSuccess} />

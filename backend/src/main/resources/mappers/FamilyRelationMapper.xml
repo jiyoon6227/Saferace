@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.safetrace.mapper.FamilyRelationMapper">
+
+    <insert id="insert" parameterType="com.safetrace.domain.FamilyRelation">
+        <selectKey keyProperty="relationId" resultType="Long" order="BEFORE">
+            SELECT SEQ_SF_FAMILY_RELATION.NEXTVAL FROM DUAL
+        </selectKey>
+        INSERT INTO SF_FAMILY_RELATION (RELATION_ID, MEMBER_ID, FAMILY_MEMBER_ID, RELATION_TYPE, STATUS)
+        VALUES (#{relationId}, #{memberId}, #{familyMemberId}, #{relationType,jdbcType=VARCHAR}, 'PENDING')
+    </insert>
+
+    <!-- 내가 보낸 요청 - 상대방 이름/전화번호까지 조인해서 화면에 바로 표시 -->
+    <select id="findSentByMemberId" resultType="com.safetrace.domain.FamilyRelation">
+        SELECT r.RELATION_ID, r.MEMBER_ID, r.FAMILY_MEMBER_ID, r.RELATION_TYPE, r.STATUS, r.CREATED_AT,
+               m.NAME AS FAMILY_MEMBER_NAME, m.LOGIN_ID AS FAMILY_MEMBER_LOGIN_ID, m.PHONE AS FAMILY_MEMBER_PHONE
+        FROM SF_FAMILY_RELATION r
+        JOIN SF_MEMBER m ON r.FAMILY_MEMBER_ID = m.MEMBER_ID
+        WHERE r.MEMBER_ID = #{memberId}
+        ORDER BY r.CREATED_AT DESC
+    </select>
+
+    <!-- 나한테 온 요청 (수락 대기) - 요청자 이름/전화번호까지 조인 -->
+    <select id="findReceivedByMemberId" resultType="com.safetrace.domain.FamilyRelation">
+        SELECT r.RELATION_ID, r.MEMBER_ID, r.FAMILY_MEMBER_ID, r.RELATION_TYPE, r.STATUS, r.CREATED_AT,
+               m.NAME AS FAMILY_MEMBER_NAME, m.LOGIN_ID AS FAMILY_MEMBER_LOGIN_ID, m.PHONE AS FAMILY_MEMBER_PHONE
+        FROM SF_FAMILY_RELATION r
+        JOIN SF_MEMBER m ON r.MEMBER_ID = m.MEMBER_ID
+        WHERE r.FAMILY_MEMBER_ID = #{memberId}
+          AND r.STATUS = 'PENDING'
+        ORDER BY r.CREATED_AT DESC
+    </select>
+
+    <!--
+        ACCEPTED인 실제 가족 목록. 관계는 방향 상관없이 한 행만 저장되므로
+        (A->B 요청을 B가 수락해도 행은 하나), 내가 MEMBER_ID인 경우 /
+        FAMILY_MEMBER_ID인 경우 둘 다 UNION으로 조회해서 "상대방"을 올바르게 표시한다.
+    -->
+    <select id="findAcceptedFamilies" resultType="com.safetrace.domain.FamilyRelation">
+        SELECT r.RELATION_ID, r.MEMBER_ID, r.FAMILY_MEMBER_ID, r.RELATION_TYPE, r.STATUS, r.CREATED_AT,
+               m.NAME AS FAMILY_MEMBER_NAME, m.LOGIN_ID AS FAMILY_MEMBER_LOGIN_ID, m.PHONE AS FAMILY_MEMBER_PHONE
+        FROM SF_FAMILY_RELATION r
+        JOIN SF_MEMBER m ON r.FAMILY_MEMBER_ID = m.MEMBER_ID
+        WHERE r.MEMBER_ID = #{memberId}
+          AND r.STATUS = 'ACCEPTED'
+        UNION ALL
+        SELECT r.RELATION_ID, r.FAMILY_MEMBER_ID AS MEMBER_ID, r.MEMBER_ID AS FAMILY_MEMBER_ID,
+               r.RELATION_TYPE, r.STATUS, r.CREATED_AT,
+               m.NAME AS FAMILY_MEMBER_NAME, m.LOGIN_ID AS FAMILY_MEMBER_LOGIN_ID, m.PHONE AS FAMILY_MEMBER_PHONE
+        FROM SF_FAMILY_RELATION r
+        JOIN SF_MEMBER m ON r.MEMBER_ID = m.MEMBER_ID
+        WHERE r.FAMILY_MEMBER_ID = #{memberId}
+          AND r.STATUS = 'ACCEPTED'
+        ORDER BY FAMILY_MEMBER_NAME ASC
+    </select>
+
+    <update id="accept">
+        UPDATE SF_FAMILY_RELATION
+        SET STATUS = 'ACCEPTED'
+        WHERE RELATION_ID = #{relationId}
+    </update>
+
+    <delete id="delete">
+        DELETE FROM SF_FAMILY_RELATION
+        WHERE RELATION_ID = #{relationId}
+    </delete>
+
+</mapper>

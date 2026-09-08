@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.safetrace.mapper.SafetyCheckMapper">
+
+    <insert id="insert" parameterType="com.safetrace.domain.SafetyCheck">
+        <selectKey keyProperty="checkId" resultType="Long" order="BEFORE">
+            SELECT SEQ_SF_SAFETY_CHECK.NEXTVAL FROM DUAL
+        </selectKey>
+        INSERT INTO SF_SAFETY_CHECK
+            (CHECK_ID, REQUESTER_ID, TARGET_MEMBER_ID, INCIDENT_ID, STATUS, TOKEN, TOKEN_EXPIRES_AT)
+        VALUES
+            (#{checkId}, #{requesterId}, #{targetMemberId}, #{incidentId,jdbcType=NUMERIC}, 'PENDING',
+             #{token}, #{tokenExpiresAt})
+    </insert>
+
+    <!-- 이메일 링크 클릭 시 토큰으로 조회 -->
+    <select id="findByToken" resultType="com.safetrace.domain.SafetyCheck">
+        SELECT CHECK_ID, REQUESTER_ID, TARGET_MEMBER_ID, INCIDENT_ID, STATUS,
+               TOKEN, TOKEN_EXPIRES_AT, REQUESTED_AT, CONFIRMED_AT
+        FROM SF_SAFETY_CHECK
+        WHERE TOKEN = #{token}
+    </select>
+
+    <!-- 내가 보낸 안전확인 요청 이력 - 대상자 이름/사건 제목까지 조인 -->
+    <select id="findSentByRequesterId" resultType="com.safetrace.domain.SafetyCheck">
+        SELECT c.CHECK_ID, c.REQUESTER_ID, c.TARGET_MEMBER_ID, c.INCIDENT_ID, c.STATUS,
+               c.REQUESTED_AT, c.CONFIRMED_AT,
+               m.NAME AS TARGET_MEMBER_NAME,
+               i.TITLE AS INCIDENT_TITLE
+        FROM SF_SAFETY_CHECK c
+        JOIN SF_MEMBER m ON c.TARGET_MEMBER_ID = m.MEMBER_ID
+        LEFT JOIN SF_INCIDENT i ON c.INCIDENT_ID = i.INCIDENT_ID
+        WHERE c.REQUESTER_ID = #{requesterId}
+        ORDER BY c.REQUESTED_AT DESC
+    </select>
+
+    <!-- 내가 받은 안전확인 요청 이력 - 요청자 이름/사건 제목까지 조인 -->
+    <select id="findReceivedByTargetId" resultType="com.safetrace.domain.SafetyCheck">
+        SELECT c.CHECK_ID, c.REQUESTER_ID, c.TARGET_MEMBER_ID, c.INCIDENT_ID, c.STATUS,
+               c.REQUESTED_AT, c.CONFIRMED_AT,
+               m.NAME AS REQUESTER_NAME,
+               i.TITLE AS INCIDENT_TITLE
+        FROM SF_SAFETY_CHECK c
+        JOIN SF_MEMBER m ON c.REQUESTER_ID = m.MEMBER_ID
+        LEFT JOIN SF_INCIDENT i ON c.INCIDENT_ID = i.INCIDENT_ID
+        WHERE c.TARGET_MEMBER_ID = #{targetMemberId}
+        ORDER BY c.REQUESTED_AT DESC
+    </select>
+
+    <!-- 로그인 상태에서 응답 (사이트 접속 중) -->
+    <update id="respond">
+        UPDATE SF_SAFETY_CHECK
+        SET STATUS = #{status},
+            CONFIRMED_AT = SYSTIMESTAMP
+        WHERE CHECK_ID = #{checkId}
+          AND STATUS = 'PENDING'
+    </update>
+
+    <!--
+        이메일 링크로 응답. CONFIRMED_AT이 이미 채워져 있으면(=한 번 응답 완료된 토큰)
+        아무 것도 갱신되지 않도록 WHERE에 조건을 걸어 재사용을 막는다.
+        만료 여부(TOKEN_EXPIRES_AT)는 서비스 레이어에서 먼저 검사한 뒤 이 메서드를 호출한다.
+    -->
+    <update id="respondByToken">
+        UPDATE SF_SAFETY_CHECK
+        SET STATUS = #{status},
+            CONFIRMED_AT = SYSTIMESTAMP
+        WHERE TOKEN = #{token}
+          AND CONFIRMED_AT IS NULL
+    </update>
+
+</mapper>

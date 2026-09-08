@@ -2,12 +2,14 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.safetrace.mapper.ReportMapper">
 
-    <insert id="insert" parameterType="com.safetrace.domain.Report"
-            useGeneratedKeys="true" keyProperty="reportId" keyColumn="REPORT_ID">
+    <insert id="insert" parameterType="com.safetrace.domain.Report">
+        <selectKey keyProperty="reportId" resultType="Long" order="BEFORE">
+            SELECT SEQ_SF_REPORT.NEXTVAL FROM DUAL
+        </selectKey>
         INSERT INTO SF_REPORT
-            (MEMBER_ID, DISASTER_TYPE, CONTENT, LATITUDE, LONGITUDE, PHOTO_URL)
+            (REPORT_ID, MEMBER_ID, DISASTER_TYPE, CONTENT, LATITUDE, LONGITUDE, PHOTO_URL)
         VALUES
-            (#{memberId}, #{disasterType}, #{content}, #{latitude}, #{longitude}, #{photoUrl,jdbcType=VARCHAR})
+            (#{reportId}, #{memberId}, #{disasterType}, #{content}, #{latitude}, #{longitude}, #{photoUrl,jdbcType=VARCHAR})
     </insert>
 
     <select id="findById" resultType="com.safetrace.domain.Report">

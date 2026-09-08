@@ -2,15 +2,83 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.safetrace.mapper.MemberMapper">
 
-        <insert id="insert" parameterType="Member" useGeneratedKeys="true" keyProperty="memberId" keyColumn="MEMBER_ID">
-        INSERT INTO SF_MEMBER (LOGIN_ID, PASSWORD, NAME, ROLE)
-        VALUES (#{loginId}, #{password}, #{name}, #{role})
+    <insert id="insert" parameterType="Member">
+        <selectKey keyProperty="memberId" resultType="Long" order="BEFORE">
+            SELECT SEQ_SF_MEMBER.NEXTVAL FROM DUAL
+        </selectKey>
+        INSERT INTO SF_MEMBER (MEMBER_ID, LOGIN_ID, PASSWORD, NAME, EMAIL, ROLE)
+        VALUES (#{memberId}, #{loginId}, #{password}, #{name}, #{email,jdbcType=VARCHAR}, #{role})
     </insert>
 
+    <!-- 회원 전체 컬럼 - 여러 조회 메서드에서 재사용 -->
+    <sql id="memberColumns">
+        MEMBER_ID, LOGIN_ID, PASSWORD, NAME, EMAIL, PHONE, PROFILE_IMAGE_URL,
+        ADDRESS, ADDRESS_DETAIL, ROLE,
+        EMAIL_NOTIFY_ENABLED, DISASTER_NOTIFY_ENABLED, REPORT_NOTIFY_ENABLED,
+        IS_WITHDRAWN, WITHDRAWN_AT, CREATED_AT
+    </sql>
+
     <select id="findByLoginId" resultType="Member">
-        SELECT MEMBER_ID, LOGIN_ID, PASSWORD, NAME, ROLE, CREATED_AT
+        SELECT <include refid="memberColumns"/>
         FROM SF_MEMBER
         WHERE LOGIN_ID = #{loginId}
+          AND IS_WITHDRAWN = 'N'
     </select>
+
+    <!-- 마이페이지 - 내정보 조회 -->
+    <select id="findById" resultType="Member">
+        SELECT <include refid="memberColumns"/>
+        FROM SF_MEMBER
+        WHERE MEMBER_ID = #{memberId}
+    </select>
+
+    <!-- 이메일 중복 확인용 -->
+    <select id="findByEmail" resultType="Member">
+        SELECT <include refid="memberColumns"/>
+        FROM SF_MEMBER
+        WHERE EMAIL = #{email}
+          AND IS_WITHDRAWN = 'N'
+    </select>
+
+    <!-- 가족 등록 - 로그인ID로 상대방 검색 (탈퇴한 회원 제외) -->
+    <select id="searchByLoginId" resultType="Member">
+        SELECT <include refid="memberColumns"/>
+        FROM SF_MEMBER
+        WHERE LOGIN_ID LIKE '%' || #{loginId} || '%'
+          AND IS_WITHDRAWN = 'N'
+    </select>
+
+    <!-- 마이페이지 - 내정보 수정 (이름/비밀번호/역할은 여기서 안 건드림) -->
+    <update id="update" parameterType="Member">
+        UPDATE SF_MEMBER
+        SET NAME = #{name},
+            EMAIL = #{email,jdbcType=VARCHAR},
+            PHONE = #{phone,jdbcType=VARCHAR},
+            PROFILE_IMAGE_URL = #{profileImageUrl,jdbcType=VARCHAR},
+            ADDRESS = #{address,jdbcType=VARCHAR},
+            ADDRESS_DETAIL = #{addressDetail,jdbcType=VARCHAR}
+        WHERE MEMBER_ID = #{memberId}
+    </update>
+
+    <update id="updatePassword">
+        UPDATE SF_MEMBER
+        SET PASSWORD = #{encodedPassword}
+        WHERE MEMBER_ID = #{memberId}
+    </update>
+
+    <update id="updateNotificationSettings" parameterType="Member">
+        UPDATE SF_MEMBER
+        SET EMAIL_NOTIFY_ENABLED = #{emailNotifyEnabled},
+            DISASTER_NOTIFY_ENABLED = #{disasterNotifyEnabled},
+            REPORT_NOTIFY_ENABLED = #{reportNotifyEnabled}
+        WHERE MEMBER_ID = #{memberId}
+    </update>
+
+    <update id="withdraw">
+        UPDATE SF_MEMBER
+        SET IS_WITHDRAWN = 'Y',
+            WITHDRAWN_AT = SYSTIMESTAMP
+        WHERE MEMBER_ID = #{memberId}
+    </update>
 
 </mapper>

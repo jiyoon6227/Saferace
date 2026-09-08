@@ -7,8 +7,18 @@ import java.time.LocalDateTime;
 public class Member {
     private Long memberId;
     private String loginId;
-    private String password;   // BCrypt 암호화된 값
+    private String password;
     private String name;
-    private String role;       // USER / STAFF / ADMIN
+    private String email;
+    private String phone;
+    private String profileImageUrl;
+    private String address;
+    private String addressDetail;
+    private String role;
+    private String emailNotifyEnabled;
+    private String disasterNotifyEnabled;
+    private String reportNotifyEnabled;
+    private String isWithdrawn;
+    private LocalDateTime withdrawnAt;
     private LocalDateTime createdAt;
 }

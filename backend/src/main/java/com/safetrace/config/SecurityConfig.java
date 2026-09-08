@@ -55,6 +55,7 @@ public class SecurityConfig {
                 .requestMatchers("/api/auth/**").permitAll()
                 .requestMatchers("/api/incidents/region/**", "/api/incidents/*/timeline").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/incidents/*").permitAll()
+                .requestMatchers("/api/safety-checks/token/**").permitAll()  // 이메일 링크 - 로그인 없이 응답 가능
                 .requestMatchers("/ws/**").permitAll()
                 .requestMatchers("/uploads/**").permitAll()
                 .anyRequest().authenticated()

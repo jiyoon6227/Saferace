@@ -2,12 +2,14 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.safetrace.mapper.IncidentMapper">
 
-    <insert id="insertIncident" parameterType="com.safetrace.domain.Incident"
-            useGeneratedKeys="true" keyProperty="incidentId" keyColumn="INCIDENT_ID">
+    <insert id="insertIncident" parameterType="com.safetrace.domain.Incident">
+        <selectKey keyProperty="incidentId" resultType="Long" order="BEFORE">
+            SELECT SEQ_SF_INCIDENT.NEXTVAL FROM DUAL
+        </selectKey>
         INSERT INTO SF_INCIDENT
-            (TITLE, DISASTER_TYPE, SEVERITY, STATUS, REGION, LATITUDE, LONGITUDE)
+            (INCIDENT_ID, TITLE, DISASTER_TYPE, SEVERITY, STATUS, REGION, LATITUDE, LONGITUDE)
         VALUES
-            (#{title}, #{disasterType}, #{severity}, 'RECEIVED', #{region}, #{latitude}, #{longitude})
+            (#{incidentId}, #{title}, #{disasterType}, #{severity}, 'RECEIVED', #{region}, #{latitude}, #{longitude})
     </insert>
 
     <select id="findById" resultType="com.safetrace.domain.Incident">
@@ -44,10 +46,13 @@
     </update>
 
     <insert id="insertLog" parameterType="com.safetrace.domain.IncidentLog">
+        <selectKey keyProperty="logId" resultType="Long" order="BEFORE">
+            SELECT SEQ_SF_INCIDENT_LOG.NEXTVAL FROM DUAL
+        </selectKey>
         INSERT INTO SF_INCIDENT_LOG
-            (INCIDENT_ID, PREV_STATUS, NEW_STATUS, MEMO, CHANGED_BY)
+            (LOG_ID, INCIDENT_ID, PREV_STATUS, NEW_STATUS, MEMO, CHANGED_BY)
         VALUES
-            (#{incidentId}, #{prevStatus,jdbcType=VARCHAR}, #{newStatus}, #{memo,jdbcType=VARCHAR}, #{changedBy,jdbcType=NUMERIC})
+            (#{logId}, #{incidentId}, #{prevStatus,jdbcType=VARCHAR}, #{newStatus}, #{memo,jdbcType=VARCHAR}, #{changedBy,jdbcType=NUMERIC})
     </insert>
 
     <select id="findLogsByIncidentId" resultType="com.safetrace.domain.IncidentLog">
